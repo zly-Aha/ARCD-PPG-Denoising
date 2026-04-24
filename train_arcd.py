@@ -1,6 +1,5 @@
 # train_arcd.py
-# 基于手稿 "A Unified, Rhythm-Aware Diffusion Model..." (ARCD)
-# 对应 Section 2.3 (Architecture) & 2.4 (Training)
+
 
 import os
 import argparse
@@ -15,7 +14,7 @@ import scipy.io as sio
 
 
 # -----------------------------
-# 1. 数据集 (Sec 2.1)
+
 # -----------------------------
 class RhythmPPGDataset(Dataset):
     def __init__(self, data_dir, list_file, signal_len=1000, target_labels=[0, 5]):
@@ -55,15 +54,13 @@ class RhythmPPGDataset(Dataset):
                     continue
 
                 segment = ppg_data[i, :].astype(np.float32)
-                # 简单截断或填充至 1000 点 (Sec 2.1)
+
                 if len(segment) > self.signal_len:
                     segment = segment[:self.signal_len]
                 elif len(segment) < self.signal_len:
                     segment = np.pad(segment, (0, self.signal_len - len(segment)), 'constant')
 
-                # Z-score normalization (Sec 2.1: mean=0, variance=1)
-                # 注意：代码原文用的是 MinMax [-1, 1]，这里保留原代码的MinMax以配合Diffusion
-                # 如果手稿严格要求Z-score，通常Diffusion输入还是会再次缩放到[-1,1]或保持N(0,1)
+
                 min_v, max_v = np.min(segment), np.max(segment)
                 if max_v - min_v > 1e-6:
                     segment = 2 * ((segment - min_v) / (max_v - min_v)) - 1
@@ -83,7 +80,7 @@ class RhythmPPGDataset(Dataset):
 
 
 # -----------------------------
-# 2. Diffusion 基础工具
+
 # -----------------------------
 def get_timestep_embedding(timesteps, embedding_dim=128):
     half_dim = embedding_dim // 2
@@ -93,7 +90,7 @@ def get_timestep_embedding(timesteps, embedding_dim=128):
     return emb
 
 
-def get_beta_schedule(T=1000):  # 手稿 Table 2: T=1000
+def get_beta_schedule(T=1000): 
     s = 0.008
     timesteps = torch.arange(0, T + 1)
     betas = torch.cos((timesteps / T + s) / (1 + s) * torch.pi / 2) ** 2
@@ -117,11 +114,11 @@ def estimate_x0_stable(x_t, t, noise_pred, alpha_bars):
     sqrt_alpha_bar = torch.sqrt(alpha_bar_t).view(-1, 1, 1)
     sqrt_one_minus_alpha_bar = torch.sqrt(1 - alpha_bar_t).view(-1, 1, 1)
     x0_pred = (x_t - sqrt_one_minus_alpha_bar * noise_pred) / sqrt_alpha_bar
-    return torch.clamp(x0_pred, -2.5, 2.5)  # 稍微放宽截断
+    return torch.clamp(x0_pred, -2.5, 2.5)  
 
 
 # -----------------------------
-# 3. 核心架构: ARCD Network
+
 # -----------------------------
 class CondResBlock1D(nn.Module):
     """
@@ -176,8 +173,7 @@ class CondResBlock1D(nn.Module):
 
         # Gating
         gain = torch.sigmoid(self.class_gate(class_onehot)).unsqueeze(-1)
-        # 手稿提到 gate 接近 1.0 (SR) 或 0.6-0.7 (AF)。
-        # Sigmoid 输出 (0,1)，乘以 2.0 可以覆盖 (0, 2)，足够灵活
+
         gain = 2.0 * gain
 
         # Residual Integration
@@ -190,7 +186,7 @@ class CondResBlock1D(nn.Module):
 
 class ARCD_UNet(nn.Module):
     """
-    对应 Figure 1: Conditional U-Net Backbone
+
     """
 
     def __init__(self, in_channels=3, out_channels=1, time_dim=128, num_classes=2, signal_len=1000):
@@ -291,7 +287,7 @@ class ARCD_UNet(nn.Module):
 
 
 # -----------------------------
-# 4. 训练流程 (Sec 2.4)
+
 # -----------------------------
 def train_arcd(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -302,7 +298,7 @@ def train_arcd(args):
     target_labels = [0, 5]  # SR, AF
     num_classes = len(target_labels)
 
-    # 尝试加载数据，若无文件则跳过
+
     try:
         train_set = RhythmPPGDataset(args.dataroot, 'train_samples_patient_split.txt', args.signal_len, target_labels)
         val_set = RhythmPPGDataset(args.dataroot, 'val_samples_patient_split.txt', args.signal_len, target_labels)
@@ -366,8 +362,7 @@ def train_arcd(args):
             is_sr = (labels == 0).float()
             is_af = (labels == 1).float()
 
-            # 手稿特别提到: "averaged at the batch level"
-            # 这意味着先算平均权重，再乘平均 Loss，代码这里保留原逻辑，非常准确
+
             avg_tv_weight = (args.tv_sr * is_sr.mean() + args.tv_af * is_af.mean())
             loss_tv = avg_tv_weight * tv_loss_val
 
@@ -385,8 +380,7 @@ def train_arcd(args):
 
         scheduler.step()
 
-        # 简单验证 (Standard CFG, not full ARCD inference)
-        # Full ARCD inference logic is complex and usually done in testing script
+
         if epoch % 10 == 0:
             print(f"Epoch {epoch} Completed. Saving checkpoint.")
             torch.save(model.state_dict(), os.path.join(args.ckpt_dir, f"arcd_epoch_tv{epoch}.pth"))
